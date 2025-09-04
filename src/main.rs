@@ -1,79 +1,140 @@
-use std::fs::{File, write};
-use std::io::{self, prelude::*};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use clap::Parser;
+use bar_changer::files::config::Cache;
+use bar_changer::files::{read_cache, read_file, write_file};
+
+use bar_changer::Config;
+use clap::{ArgAction, Parser};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
     #[arg(short, long)]
-    bar: String,
+    bar: Option<String>,
 
     #[arg(short, long)]
-    style: String,
+    style: Option<String>,
+
+    #[arg(short, long, action=ArgAction::SetFalse)]
+    init: bool,
 }
 
 fn main() {
-    let home_dir: String = get_home_dir().expect("Failed to get home directory");
-    let waybar = ".config/waybar";
+    let config = Config::use_default_dirs();
+    let mut cache = read_cache().unwrap();
 
     let args = Args::parse();
 
-    let style_name = args.style;
-    let bar_name = args.bar;
+    match (&args.bar, &args.style) {
+        (Some(bar), Some(style)) => {
+            println!("Switching to bar: {}, style: {}", bar, style);
+            set_bar(bar, &config).expect("Failed to set bar");
+            set_style(bar, Some(style.clone()), &config, &cache).expect("Failed to set style");
 
-    let active_style_path = format!("{}/{}/style.css", home_dir, waybar);
-    let active_config_path = format!("{}/{}/config", home_dir, waybar);
+            cache.last_bar = Some(bar.clone());
+            cache.last_style = Some(style.clone());
+
+            cache.write().expect("Failed to write cache to file");
+        }
+        (Some(bar), None) => {
+            println!("Switching to bar: {}", bar);
+            set_bar(bar, &config).expect("Failed to set bar");
+            set_style(bar, None, &config, &cache).expect("Failed to set style");
+
+            cache.last_bar = Some(bar.clone());
+
+            cache.write().expect("Failed to write cache to file");
+        }
+        (None, Some(style)) => {
+            println!("Switching to style: {}", style);
+            change_style(style, &config).expect("Failed changing style");
+
+            cache.last_style = Some(style.clone());
+
+            cache.write().expect("Failed to write cache to file");
+        }
+        (None, None) => {
+            println!("No arguments provided")
+        }
+    }
+    restart_waybar();
+}
+
+fn change_style(style_name: &str, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+    let active_style_path = format!("{}/{}/style.css", config.home_dir, config.waybar_dir);
 
     let import = format!("@import 'themes/{}.css';", style_name);
 
     // Read style sheet of specified waybar config
-    let style = read_file(format!("{}/{}/bars/{}/style.css", home_dir, waybar, bar_name).as_str())
-        .expect("Failed reading style:");
+    let raw_style = read_file(&active_style_path).expect("Failed to read active style sheet");
+    let style = raw_style
+        .split_once("\n")
+        .map(|(_, after)| after)
+        .expect("Failed to get styling");
 
     let formatted_style = format!("{}\n{}", import, style);
 
     write_file(&active_style_path, formatted_style)
         .expect("Failed to write style to active style sheet");
 
+    Ok(())
+}
+
+fn set_bar(bar: &String, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
     // Read specified config
-    let config = read_file(format!("{}/{}/bars/{}/config", home_dir, waybar, bar_name).as_str())
-        .expect("Failed reading file:");
+    let raw_config = read_file(
+        format!(
+            "{}/{}/bars/{}/config",
+            config.home_dir, config.waybar_dir, bar
+        )
+        .as_str(),
+    )
+    .expect("Failed reading file:");
 
-    write_file(&active_config_path, config).expect("Failed to write config to active config file");
+    let active_config_path = format!("{}/{}/config", config.home_dir, config.waybar_dir);
 
-    restart_waybar();
-}
-
-fn read_file(path: &str) -> Result<String, io::Error> {
-    let mut file = File::open(path)?;
-    let mut content = String::new();
-    file.read_to_string(&mut content)?;
-    Ok(content.trim().to_string())
-}
-
-fn write_file(path: &str, content: String) -> Result<(), io::Error> {
-    write(path, content)?;
+    write_file(&active_config_path, raw_config)
+        .expect("Failed to write config to active config file");
 
     Ok(())
 }
 
-fn get_home_dir() -> Option<String> {
-    #[cfg(unix)]
-    {
-        use std::process::Command;
-        let output = Command::new("whoami").output().ok()?;
-        if output.status.success() {
-            let username = String::from_utf8_lossy(&output.stdout).trim().to_string();
+fn set_style(
+    bar: &String,
+    style: Option<String>,
+    config: &Config,
+    cache: &Cache,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let style_name = style.unwrap_or_else(|| {
+        cache
+            .last_style
+            .clone()
+            .ok_or("No style has been used previously")
+            .unwrap()
+    });
 
-            return Some(format!("/home/{}", username));
-        }
-    }
+    // Read style sheet of specified waybar config
+    let style = read_file(
+        format!(
+            "{}/{}/bars/{}/style.css",
+            config.home_dir, config.waybar_dir, bar
+        )
+        .as_str(),
+    )
+    .expect("Failed reading style:");
 
-    None
+    let import = format!("@import 'themes/{}.css';", style_name);
+
+    let formatted_style = format!("{}\n{}", import, style);
+
+    let active_style_path = format!("{}/{}/style.css", config.home_dir, config.waybar_dir);
+
+    write_file(&active_style_path, formatted_style)
+        .expect("Failed to write style to active style sheet");
+
+    Ok(())
 }
 
 fn restart_waybar() {
