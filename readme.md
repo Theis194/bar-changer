@@ -157,3 +157,20 @@ A: It's typically located at ~/.config/waybar/. If you have a different path, yo
 
 Q: Does this tool restart Waybar automatically?
 A: Yes! When you run a command, bar-changer updates the active style.css and config files and signals Waybar to reload.
+
+## Closing Remarks
+
+This tool was originally built to scratch my own itch. If you have any suggestions or find a bug, you are more than welcome to open an issue on GitHub!
+
+However, I make no promises to implement every feature request unless it's something I would find useful for my own personal workflow.
+
+Happy theming! 🎨
+
+## 📄 License
+
+This project is licensed under either of
+
+- [MIT License](https://opensource.org/licenses/MIT)
+- [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+
+at your option.
