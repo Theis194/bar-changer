@@ -34,6 +34,7 @@ cargo install --path .
 
 Using bar-changer uses a directory layout with a focus on modular color styling:
 
+```
 .config/waybar/
 ├── style.css                  # The active, generated style file
 ├── config                     # The active, generated config file
@@ -44,6 +45,7 @@ Using bar-changer uses a directory layout with a focus on modular color styling:
 └── bars/                      # Directory for your bar layouts
     ├── default.json
     └── minimal.json
+```
 
 This approach splits the color styling in to their own *\*.css* files, with a standardized color naming scheme, allowing for high customizability between bars and themes.
 
