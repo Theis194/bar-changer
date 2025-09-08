@@ -2,11 +2,15 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+use bar_changer::BarChangerError;
+use bar_changer::error::errors::Context;
 use bar_changer::files::config::{Cache, Config};
 use bar_changer::files::{read_file, write_file};
 
 use clap::Parser;
 use text_io::read;
+
+pub type Result<T> = std::result::Result<T, BarChangerError>;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -41,30 +45,31 @@ fn main() {
     match (&args.bar, &args.style) {
         (Some(bar), Some(style)) => {
             println!("Switching to bar: {}, style: {}", bar, style);
-            set_bar(bar, &config).expect("Failed to set bar");
-            set_style(bar, Some(style.clone()), &config, &cache).expect("Failed to set style");
+            let _ = set_bar(bar, &config).context("Failed to set bar");
+            let _ =
+                set_style(bar, Some(style.clone()), &config, &cache).context("Failed to set style");
 
             cache.last_bar = Some(bar.clone());
             cache.last_style = Some(style.clone());
 
-            cache.write().expect("Failed to write cache to file");
+            let _ = cache.write().context("Failed to write cache to file");
         }
         (Some(bar), None) => {
             println!("Switching to bar: {}", bar);
-            set_bar(bar, &config).expect("Failed to set bar");
-            set_style(bar, None, &config, &cache).expect("Failed to set style");
+            let _ = set_bar(bar, &config).context("Failed to set bar");
+            let _ = set_style(bar, None, &config, &cache).context("Failed to set style");
 
             cache.last_bar = Some(bar.clone());
 
-            cache.write().expect("Failed to write cache to file");
+            let _ = cache.write().context("Failed to write cache to file");
         }
         (None, Some(style)) => {
             println!("Switching to style: {}", style);
-            change_style(style, &config).expect("Failed changing style");
+            let _ = change_style(style, &config).context("Failed changing style");
 
             cache.last_style = Some(style.clone());
 
-            cache.write().expect("Failed to write cache to file");
+            let _ = cache.write().context("Failed to write cache to file");
         }
         (None, None) => {
             if args.init {
@@ -76,19 +81,19 @@ fn main() {
                     }
                 };
 
-                config.write().expect("Failed to write config to file");
+                let _ = config.write().context("Failed to write config to file");
             } else {
                 println!("No operation specified. Use --help for usage information.");
             }
         }
     }
-    restart_waybar();
+    let _ = restart_waybar();
 }
 
-fn init() -> Result<Config, Box<dyn std::error::Error>> {
+fn init() -> Result<Config> {
     let mut config = Config::use_default_dirs();
 
-    if !config.dir_exists() {
+    if !config.dir_exists()? {
         println!(
             "Can bar-changer create a directory at (y/n): {}/.config/bar-changer/",
             config.home_dir
@@ -104,7 +109,11 @@ fn init() -> Result<Config, Box<dyn std::error::Error>> {
                     config.create_dir()?;
                     break;
                 }
-                "n" => return Err("Not permitted to write config".into()),
+                "n" => {
+                    return Err(BarChangerError::PermissionDenied(
+                        "Not permitted to write config".to_string(),
+                    ));
+                }
                 _ => println!("Invalid input"),
             }
         }
@@ -139,13 +148,13 @@ fn init() -> Result<Config, Box<dyn std::error::Error>> {
     Ok(config)
 }
 
-fn change_style(style_name: &str, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+fn change_style(style_name: &str, config: &Config) -> Result<()> {
     let active_style_path = format!("{}/{}/style.css", config.home_dir, config.waybar_dir);
 
     let import = format!("@import 'themes/{}.css';", style_name);
 
     // Read style sheet of specified waybar config
-    let raw_style = read_file(&active_style_path).expect("Failed to read active style sheet");
+    let raw_style = read_file(&active_style_path).context("Failed to read active style sheet")?;
     let style = raw_style
         .split_once("\n")
         .map(|(_, after)| after)
@@ -154,12 +163,12 @@ fn change_style(style_name: &str, config: &Config) -> Result<(), Box<dyn std::er
     let formatted_style = format!("{}\n{}", import, style);
 
     write_file(&active_style_path, formatted_style)
-        .expect("Failed to write style to active style sheet");
+        .context("Failed to write style to active style sheet")?;
 
     Ok(())
 }
 
-fn set_bar(bar: &String, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+fn set_bar(bar: &String, config: &Config) -> Result<()> {
     // Read specified config
     let raw_config = read_file(
         format!(
@@ -168,22 +177,17 @@ fn set_bar(bar: &String, config: &Config) -> Result<(), Box<dyn std::error::Erro
         )
         .as_str(),
     )
-    .expect("Failed reading file:");
+    .context("Failed reading file:")?;
 
     let active_config_path = format!("{}/{}/config", config.home_dir, config.waybar_dir);
 
     write_file(&active_config_path, raw_config)
-        .expect("Failed to write config to active config file");
+        .context("Failed to write config to active config file")?;
 
     Ok(())
 }
 
-fn set_style(
-    bar: &String,
-    style: Option<String>,
-    config: &Config,
-    cache: &Cache,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn set_style(bar: &String, style: Option<String>, config: &Config, cache: &Cache) -> Result<()> {
     let style_name = style.unwrap_or_else(|| {
         cache
             .last_style
@@ -200,7 +204,7 @@ fn set_style(
         )
         .as_str(),
     )
-    .expect("Failed reading style:");
+    .context("Failed reading style:")?;
 
     let import = format!("@import 'themes/{}.css';", style_name);
 
@@ -209,12 +213,12 @@ fn set_style(
     let active_style_path = format!("{}/{}/style.css", config.home_dir, config.waybar_dir);
 
     write_file(&active_style_path, formatted_style)
-        .expect("Failed to write style to active style sheet");
+        .context("Failed to write style to active style sheet")?;
 
     Ok(())
 }
 
-fn restart_waybar() {
+fn restart_waybar() -> Result<()> {
     if is_waybar_running() {
         println!("Waybar is running, killing it...");
         let _ = Command::new("killall").arg("waybar").output();
@@ -226,7 +230,9 @@ fn restart_waybar() {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("Failed to start waybar");
+        .context("Failed to start waybar")?;
+
+    Ok(())
 }
 
 fn is_waybar_running() -> bool {

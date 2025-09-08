@@ -1,7 +1,11 @@
 use std::fs::{create_dir, exists};
 
+use crate::BarChangerError;
+use crate::error::errors::Context;
 use crate::files::{files::file_exists, get_home_dir, read_file, write_file};
 use serde::{Deserialize, Serialize};
+
+pub type Result<T> = std::result::Result<T, BarChangerError>;
 
 #[derive(Deserialize, Serialize)]
 pub struct Config {
@@ -17,40 +21,51 @@ impl Config {
         }
     }
 
-    pub fn write(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let serialized_config = toml::to_string(self).expect("Failed to serialize config");
+    pub fn write(&self) -> Result<()> {
+        let serialized_config = toml::to_string(self)
+            .map_err(|_| BarChangerError::Serialization("config".to_string()))?;
 
         let config_location = format!("{}/.config/bar-changer/config.toml", self.home_dir);
 
-        write_file(&config_location, serialized_config).expect("Failed to write config to file");
+        write_file(&config_location, serialized_config)
+            .context("Failed to write config".to_string())?;
 
         Ok(())
     }
 
-    pub fn load() -> Result<Config, Box<dyn std::error::Error>> {
-        let home_dir = get_home_dir().expect("Failed to get home dir");
+    pub fn load() -> Result<Config> {
+        let home_dir = get_home_dir()?;
         let config_location = format!("{}/.config/bar-changer/config.toml", home_dir);
-        if file_exists(&config_location) {
-            let config_raw = read_file(&config_location).expect("Failed to read config file");
-            let config: Config = toml::from_str(&config_raw).expect("Failed deserializing cache");
+
+        if file_exists(&config_location)? {
+            let config_raw = read_file(&config_location)?;
+            let config: Config = toml::from_str(&config_raw)
+                .map_err(|_| BarChangerError::DeSerialization("config".to_string()))?;
             return Ok(config);
         }
-        Err("Config file did not exist".into())
+
+        Err(BarChangerError::ConfigNotFound(
+            "Config file did not exist".to_string(),
+        ))
     }
 
-    pub fn create_dir(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn create_dir(&self) -> Result<()> {
         let config_dir = format!("{}/.config/bar-changer/", self.home_dir);
         if !exists(&config_dir)? {
-            create_dir(config_dir).expect("Failed to create bar-changer config dir");
+            create_dir(config_dir)
+                .map_err(|e| BarChangerError::Io(e))
+                .context("Failed to create bar-changer config dir")?;
         }
 
         Ok(())
     }
 
-    pub fn dir_exists(&self) -> bool {
+    pub fn dir_exists(&self) -> Result<bool> {
         let config_dir = format!("{}/.config/bar-changer/", self.home_dir);
 
-        exists(config_dir).expect("Failed to find config dir")
+        exists(config_dir)
+            .map_err(|e| BarChangerError::Io(e))
+            .context("Failed to find config dir")
     }
 }
 
@@ -61,28 +76,36 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn write(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let serialized_cache = toml::to_string(self).expect("Failed to serialize cache");
+    pub fn write(&self) -> Result<()> {
+        let serialized_cache = toml::to_string(self)
+            .map_err(|_| BarChangerError::DeSerialization("cache".to_string()))
+            .context("Failed to serialize cache")?;
 
-        let home_dir = get_home_dir().expect("Failed to get home dir");
+        let home_dir = get_home_dir()?;
         let cache_location = format!("{}/.cache/bar-changer/cache.toml", home_dir);
 
-        write_file(&cache_location, serialized_cache).expect("Failed to write cache to file");
+        write_file(&cache_location, serialized_cache)?;
 
         Ok(())
     }
 
-    pub fn load() -> Result<Cache, Box<dyn std::error::Error>> {
+    pub fn load() -> Result<Cache> {
         let home_dir = get_home_dir().expect("Failed to get home dir");
         let cache_location = format!("{}/.cache/bar-changer/cache.toml", home_dir);
-        if file_exists(&cache_location) {
-            let cache_raw = read_file(&cache_location).expect("Failed to read cache file");
-            let cache: Cache = toml::from_str(&cache_raw).expect("Failed deserializing cache");
+
+        if file_exists(&cache_location)? {
+            let cache_raw = read_file(&cache_location).context("Failed to read cache file")?;
+            let cache: Cache = toml::from_str(&cache_raw)
+                .map_err(|_| BarChangerError::DeSerialization("cache".to_string()))
+                .context("Failed deserializing cache")?;
+
             return Ok(cache);
         } else {
             let cache_dir = format!("{}/.cache/bar-changer/", home_dir);
             if !exists(&cache_dir)? {
-                create_dir(cache_dir).expect("Failed to create bar-changer cache dir");
+                create_dir(cache_dir)
+                    .map_err(|e| BarChangerError::Io(e))
+                    .context("Failed to create bar-changer cache dir")?;
             }
             let cache = Cache {
                 last_bar: None,
@@ -93,7 +116,7 @@ impl Cache {
                 cache_location.as_str(),
                 toml::to_string(&cache).expect("Failed to serialize cache"),
             )
-            .expect("Failed to create cache file");
+            .context("Failed to create cache file")?;
             return Ok(cache);
         }
     }
